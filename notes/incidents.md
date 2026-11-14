@@ -100,8 +100,10 @@
 | **Found by** | Policy review before running eksctl. **Not exploited.** |
 
 - **Impact (potential):** the deployer could make itself an account administrator. That
-  breaks D2 in `decisions.md`, which says the deployer must not be able to create roles,
-  because that leads to privilege escalation.
+  breaks D2 in `decisions.md`: the deployer must not create roles, because that leads to
+  privilege escalation.
+
+### 1. Found the escalation path
 
 - **Evidence:** the policy granted, on `arn:aws:iam::*:role/platform-lab-*` and `eksctl-*`:
   - `iam:CreateRole` with **no condition**, so the deployer chooses the trust policy.
@@ -122,73 +124,76 @@
   Second path: give a `platform-lab-*` node role admin permissions, create a nodegroup with it,
   then run a pod on the node and read the role's credentials from instance metadata.
 
-- **Root cause:** eksctl needs to create the cluster and node roles, so IAM write actions were
-  added to the deployer. Scoping them by **role name** (`platform-lab-*`) limits *which roles*
-  can be written, not *what those roles can do*. Any identity that can both create a role and
-  write its permissions can grant itself anything.
+- **Root cause:** eksctl needs to create cluster and node roles, so IAM write actions were added
+  to the deployer, against D2. Scoping them by **role name** (`platform-lab-*`) limits *which
+  roles* can be written, not *what those roles can do*. An identity that can both create a role
+  and write its permissions can grant itself anything.
 
-- **Fix:** a **permissions boundary**.
-  - New managed policy `platform-lab-boundary` (`notes/policies/platform-lab-boundary.json`),
-    created by an **admin identity**. It is a ceiling: it allows only the services EKS clusters
-    and nodes use, and **denies** `iam:*`, `sts:AssumeRole`, `organizations:*` and `account:*`.
-  - Deployer policy (`notes/policies/deployer-policy.json`):
-    - `CreateRole`, `PutRolePolicy`, `DeleteRolePolicy`, `DetachRolePolicy` are allowed **only if**
-      `iam:PermissionsBoundary` equals the `platform-lab-boundary` ARN.
-    - `AttachRolePolicy` needs **both** the boundary and the EKS-only `iam:PolicyARN` list, in
-      one statement (two separate Allows would be OR-ed and lose the EKS-only rule).
-    - Explicit **Deny** on `DeleteRolePermissionsBoundary`, `PutRolePermissionsBoundary`,
-      `UpdateAssumeRolePolicy`, `CreatePolicyVersion`, `SetDefaultPolicyVersion`, `DeletePolicy`,
-      so the boundary cannot be removed or edited.
-    - Account wildcards `arn:aws:iam::*:` replaced by `771983217432`.
-  - eksctl config sets `iam.serviceRolePermissionsBoundary` and
-    `managedNodeGroups[].iam.instanceRolePermissionsBoundary`, so the roles CloudFormation
-    creates carry the boundary.
+### 2. First fix: a permissions boundary
 
-  Result: the deployer can still create `platform-lab-pwn` with `*:*`, but the role's effective
-  permissions are `inline policy ∩ boundary`, so no IAM and no role assumption.
+- Created `platform-lab-boundary` (`notes/policies/platform-lab-boundary.json`) as admin. It
+  allowed `eks:*`, `ec2:*`, `ecr:*`, `elasticloadbalancing:*`, `ssm:*`, `logs:*` and similar,
+  and denied `iam:*`, `sts:AssumeRole`, `organizations:*`, `account:*`.
+- Changed the deployer policy so `CreateRole` / `PutRolePolicy` / `AttachRolePolicy` were allowed
+  **only** with `iam:PermissionsBoundary` = that ARN, plus an explicit Deny on removing or editing
+  the boundary.
+- This stopped the path to **IAM admin**: a created role's effective permissions are
+  `inline policy ∩ boundary`, and the boundary has no IAM.
 
-- **Status:** fix written, **not yet applied**. Apply order: an admin creates the boundary first,
-  then updates the deployer policy.
+### 3. Review: the boundary was too broad
 
-- **Verification** (after applying):
+- A boundary limits **what the role can do**. It does **not** limit **who can assume the role**.
+  The `sts:AssumeRole` deny in the boundary only stops the role's own sessions from assuming
+  *other* roles. The deployer could still:
+  1. create `platform-lab-x` with the boundary and a trust policy naming itself,
+  2. put an inline `*:*` policy on it,
+  3. assume it, and get everything inside the boundary: `ec2:*`, `ecr:*`, `ssm:*`, ...
+- That is far more than the deployer has itself (six `ec2:Describe*` actions, one ECR
+  repository). With `ec2:*` and `ssm:*` on the whole account, it could terminate instances, open
+  security groups, or run commands on any SSM-managed host, **including prod**.
+- So the boundary turned "path to admin" into "path to almost everything except IAM". Still an
+  escalation.
 
-  ```bash
-  # 1. Without the boundary → must fail
-  aws iam create-role --role-name platform-lab-esc-test \
-    --assume-role-policy-document file://notes/policies/trust.json \
-    --profile platform-lab-deployer                                   # AccessDenied ✔
+### 4. Final fix: removed role creation from the deployer
 
-  # 2. With the boundary → allowed
-  aws iam create-role --role-name platform-lab-esc-test \
-    --assume-role-policy-document file://notes/policies/trust.json \
-    --permissions-boundary arn:aws:iam::771983217432:policy/platform-lab-boundary \
-    --profile platform-lab-deployer                                   # works
+- Removed `iam:CreateRole` and `iam:PutRolePolicy` from the deployer policy entirely. The
+  deployer can no longer create a role or write its permissions, so there is no role it can
+  make stronger than itself.
+- This matches **D2** as written: roles are created by an admin identity, not by the deployer.
+- `platform-lab-boundary` is **kept but unused**. If eksctl later needs to create roles, the
+  boundary approach comes back, and the boundary must first be tightened to the actions in the
+  AWS-managed EKS policies, not service wildcards.
 
-  # 3. Removing the boundary → must fail
-  aws iam delete-role-permissions-boundary --role-name platform-lab-esc-test \
-    --profile platform-lab-deployer                                   # AccessDenied ✔
+- **Status:** applied in AWS.
 
-  # 4. Even with *:* inline, IAM is blocked (run as admin)
-  aws iam simulate-principal-policy \
-    --policy-source-arn arn:aws:iam::771983217432:role/platform-lab-esc-test \
-    --action-names iam:CreateUser iam:AttachUserPolicy --profile <admin-profile>  # implicitDeny/explicitDeny ✔
+### 5. Verification
 
-  # Clean up
-  aws iam delete-role --role-name platform-lab-esc-test --profile platform-lab-deployer
-  ```
+```bash
+aws iam create-role --role-name platform-lab-esc-test \
+  --assume-role-policy-document file://notes/policies/trust.json \
+  --profile platform-lab-deployer                                   # AccessDenied ✔
 
-- **Follow-up:** the boundary still allows `ec2:*`, `ssm:*` and similar. A role the deployer
-  creates can reach everything inside it, which is more than the deployer itself has. Tighten the
-  boundary to the actions in the AWS-managed EKS policies.
+aws iam create-role --role-name platform-lab-esc-test \
+  --assume-role-policy-document file://notes/policies/trust.json \
+  --permissions-boundary arn:aws:iam::771983217432:policy/platform-lab-boundary \
+  --profile platform-lab-deployer                                   # AccessDenied ✔ (boundary no longer opens a door)
+```
 
-- **Prevention:**
-  - Treat `iam:CreateRole` + `iam:PutRolePolicy` (or `AttachRolePolicy`, `PassRole`) together as
-    an escalation signal in every policy review.
-  - Name scoping (`platform-lab-*`) is not a security limit on its own. Add a **boundary condition**
-    whenever an identity can create or change other identities.
-  - When a decision (D2) has to change to unblock a tool, update the decision instead of quietly
-    adding permissions.
+Both must fail. If the second one works, `CreateRole` is still granted somewhere.
 
-- **Lesson:** a permissions boundary grants nothing. It is a ceiling: effective permissions are
-  `identity policies ∩ boundary`. It is the safe way to let a deployer create roles: whatever it
-  creates can never be stronger than the boundary.
+### Prevention
+
+- Treat `iam:CreateRole` + `iam:PutRolePolicy` (or `AttachRolePolicy`, `PassRole`) together as
+  an escalation signal in every policy review.
+- Name scoping (`platform-lab-*`) is not a security limit on its own.
+- When reviewing a boundary, ask two questions: *what can a role inside it do?* and *who can
+  assume that role?* The boundary answers only the first.
+- When a decision (D2) has to change to unblock a tool, update the decision instead of quietly
+  adding permissions.
+
+### Lesson
+
+A permissions boundary grants nothing; it is a ceiling (`identity policies ∩ boundary`). It stops
+a created role from reaching IAM, but if the creator can also write the role's trust policy and
+assume it, the creator gets **everything up to the ceiling**. The simplest safe fix is to not let
+the deployer create roles at all.
