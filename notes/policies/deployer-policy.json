@@ -1,0 +1,273 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ECRAuth",
+            "Effect": "Allow",
+            "Action": "ecr:GetAuthorizationToken",
+            "Resource": "*"
+        },
+        {
+            "Sid": "BudgetsRead",
+            "Effect": "Allow",
+            "Action": [
+                "budgets:DescribeBudgetAction",
+                "budgets:ViewBudget",
+                "budgets:ListTagsForResource",
+                "budgets:DescribeBudgetActionsForBudget",
+                "budgets:DescribeBudgetActionsForAccount",
+                "budgets:DescribeBudgetActionHistories"
+            ],
+            "Resource": "arn:aws:budgets::771983217432:budget/*"
+        },
+        {
+            "Sid": "ECRRepositories",
+            "Effect": "Allow",
+            "Action": [
+                "ecr:CreateRepository",
+                "ecr:DeleteRepository",
+                "ecr:DescribeRepositories",
+                "ecr:DescribeImages",
+                "ecr:ListImages",
+                "ecr:BatchGetImage",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:InitiateLayerUpload",
+                "ecr:UploadLayerPart",
+                "ecr:CompleteLayerUpload",
+                "ecr:PutImage",
+                "ecr:BatchDeleteImage",
+                "ecr:PutLifecyclePolicy",
+                "ecr:TagResource"
+            ],
+            "Resource": "arn:aws:ecr:sa-east-1:771983217432:repository/platform-lab-repository"
+        },
+        {
+            "Sid": "EKS",
+            "Effect": "Allow",
+            "Action": [
+                "eks:CreateCluster",
+                "eks:DeleteCluster",
+                "eks:DescribeCluster",
+                "eks:ListClusters",
+                "eks:UpdateClusterConfig",
+                "eks:UpdateClusterVersion",
+                "eks:CreateNodegroup",
+                "eks:DeleteNodegroup",
+                "eks:DescribeNodegroup",
+                "eks:ListNodegroups",
+                "eks:UpdateNodegroupConfig",
+                "eks:UpdateNodegroupVersion",
+                "eks:CreateAddon",
+                "eks:DeleteAddon",
+                "eks:DescribeAddon",
+                "eks:DescribeAddonVersions",
+                "eks:ListAddons",
+                "eks:UpdateAddon",
+                "eks:CreateAccessEntry",
+                "eks:DeleteAccessEntry",
+                "eks:DescribeAccessEntry",
+                "eks:ListAccessEntries",
+                "eks:AssociateAccessPolicy",
+                "eks:DisassociateAccessPolicy",
+                "eks:ListAssociatedAccessPolicies",
+                "eks:DescribeUpdate",
+                "eks:ListUpdates",
+                "eks:TagResource",
+                "eks:UntagResource",
+                "eks:AccessKubernetesApi"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "EC2ExtrasForEKS",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeAvailabilityZones",
+                "ec2:DescribeAccountAttributes",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DeleteNetworkInterface",
+                "ec2:DescribeVolumes"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SSMEksAmi",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters"
+            ],
+            "Resource": "arn:aws:ssm:sa-east-1::parameter/aws/service/eks/optimized-ami/*"
+        },
+        {
+            "Sid": "IAMRoleReads",
+            "Effect": "Allow",
+            "Action": [
+                "iam:GetRole",
+                "iam:GetPolicy",
+                "iam:GetRolePolicy",
+                "iam:ListAttachedRolePolicies",
+                "iam:ListRolePolicies",
+                "iam:GetInstanceProfile",
+                "iam:ListInstanceProfilesForRole"
+            ],
+            "Resource": [
+                "arn:aws:iam::771983217432:role/eksctl-*",
+                "arn:aws:iam::771983217432:role/platform-lab-*",
+                "arn:aws:iam::771983217432:instance-profile/eksctl-*",
+                "arn:aws:iam::771983217432:instance-profile/platform-lab-*"
+            ]
+        },
+        {
+            "Sid": "IAMRoleWritesOnlyWithBoundary",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateRole",
+                "iam:PutRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:DetachRolePolicy"
+            ],
+            "Resource": [
+                "arn:aws:iam::771983217432:role/eksctl-*",
+                "arn:aws:iam::771983217432:role/platform-lab-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::771983217432:policy/platform-lab-boundary"
+                }
+            }
+        },
+        {
+            "Sid": "AttachOnlyEKSManagedPoliciesWithBoundary",
+            "Effect": "Allow",
+            "Action": "iam:AttachRolePolicy",
+            "Resource": [
+                "arn:aws:iam::771983217432:role/eksctl-*",
+                "arn:aws:iam::771983217432:role/platform-lab-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PermissionsBoundary": "arn:aws:iam::771983217432:policy/platform-lab-boundary"
+                },
+                "ArnLike": {
+                    "iam:PolicyARN": [
+                        "arn:aws:iam::aws:policy/AmazonEKS*",
+                        "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+                        "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
+                        "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+                        "arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "IAMRoleLifecycle",
+            "Effect": "Allow",
+            "Action": [
+                "iam:DeleteRole",
+                "iam:TagRole",
+                "iam:UntagRole",
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile"
+            ],
+            "Resource": [
+                "arn:aws:iam::771983217432:role/eksctl-*",
+                "arn:aws:iam::771983217432:role/platform-lab-*",
+                "arn:aws:iam::771983217432:instance-profile/eksctl-*",
+                "arn:aws:iam::771983217432:instance-profile/platform-lab-*"
+            ]
+        },
+        {
+            "Sid": "PassRolesToEKSAndEC2",
+            "Effect": "Allow",
+            "Action": "iam:PassRole",
+            "Resource": [
+                "arn:aws:iam::771983217432:role/eksctl-*",
+                "arn:aws:iam::771983217432:role/platform-lab-*"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "iam:PassedToService": [
+                        "eks.amazonaws.com",
+                        "ec2.amazonaws.com"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "OIDCProviderForServiceAccounts",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateOpenIDConnectProvider",
+                "iam:GetOpenIDConnectProvider",
+                "iam:DeleteOpenIDConnectProvider",
+                "iam:TagOpenIDConnectProvider"
+            ],
+            "Resource": "arn:aws:iam::771983217432:oidc-provider/oidc.eks.sa-east-1.amazonaws.com/*"
+        },
+        {
+            "Sid": "EKSServiceLinkedRoles",
+            "Effect": "Allow",
+            "Action": "iam:CreateServiceLinkedRole",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": [
+                        "eks.amazonaws.com",
+                        "eks-nodegroup.amazonaws.com"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "CloudFormationForEksctl",
+            "Effect": "Allow",
+            "Action": [
+                "cloudformation:CreateStack",
+                "cloudformation:UpdateStack",
+                "cloudformation:DeleteStack",
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResource",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:ListStacks",
+                "cloudformation:ListStackResources",
+                "cloudformation:GetTemplate",
+                "cloudformation:CreateChangeSet",
+                "cloudformation:DescribeChangeSet",
+                "cloudformation:ExecuteChangeSet",
+                "cloudformation:DeleteChangeSet"
+            ],
+            "Resource": "arn:aws:cloudformation:sa-east-1:771983217432:stack/eksctl-*/*"
+        },
+        {
+            "Sid": "ControlPlaneLogs",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:DeleteLogGroup",
+                "logs:DescribeLogGroups",
+                "logs:PutRetentionPolicy",
+                "logs:TagResource"
+            ],
+            "Resource": "arn:aws:logs:sa-east-1:771983217432:log-group:/aws/eks/*"
+        },
+        {
+            "Sid": "NeverRemoveOrChangeBoundary",
+            "Effect": "Deny",
+            "Action": [
+                "iam:DeleteRolePermissionsBoundary",
+                "iam:PutRolePermissionsBoundary",
+                "iam:UpdateAssumeRolePolicy",
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion",
+                "iam:DeletePolicy"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

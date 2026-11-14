@@ -157,3 +157,17 @@ go on **`bucket/*`**:
 
 **Lesson (least privilege):** read the `AccessDenied` error, add only the action
 it names, and attach it to the right resource ARN.
+
+## ECR
+
+```bash
+aws ecr get-login-password --region sa-east-1 --profile platform-lab-deployer | docker login --username AWS --password-stdin 771983217432.dkr.ecr.sa-east-1.amazonaws.com
+```
+
+```bash
+docker tag 46bad59e1f26 771983217432.dkr.ecr.sa-east-1.amazonaws.com/platform-lab-repository:adcd335
+```
+
+```bash
+docker push 771983217432.dkr.ecr.sa-east-1.amazonaws.com/platform-lab-repository:adcd335
+```

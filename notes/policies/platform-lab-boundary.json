@@ -1,0 +1,34 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "WhatClusterAndNodesMayDo",
+            "Effect": "Allow",
+            "Action": [
+                "eks:*",
+                "ec2:*",
+                "ecr:*",
+                "elasticloadbalancing:*",
+                "ssm:*",
+                "ssmmessages:*",
+                "ec2messages:*",
+                "logs:*",
+                "cloudwatch:*",
+                "autoscaling:*",
+                "kms:DescribeKey"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "NeverIAMOrAssume",
+            "Effect": "Deny",
+            "Action": [
+                "iam:*",
+                "sts:AssumeRole",
+                "organizations:*",
+                "account:*"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

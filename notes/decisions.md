@@ -32,6 +32,10 @@
 - **Decision:** the deployer user does **not** create IAM roles. An admin identity creates them.
 - **Why:** an identity that can run `iam:CreateRole` + `iam:PutRolePolicy` can grant itself
   any permission (privilege escalation). The deployer should only use what it was given.
+- Which identity **creates** the repository?
+  - **Answer:** First step is to use platform-lab-deployer then we'll need a role for this one to be used inside the github actions
+- Which identity **pushes** Images? Will it be the deployer user, a new role, or later a GithubOIDC role?
+  - **Answer:** Yes, same here. First we use the platform-lab-deployer and than we create a role related to GithubOIDC.
 
 ## D3: Bucket policy denies non-HTTPS
 
