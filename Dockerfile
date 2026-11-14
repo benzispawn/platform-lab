@@ -1,5 +1,7 @@
 FROM node:24-alpine
 
+RUN apk upgrade --no-cache
+
 WORKDIR /platform-lab
 
 COPY package.json package-lock.json ./
