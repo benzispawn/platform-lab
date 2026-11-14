@@ -1,5 +1,8 @@
 # Decisions
 
+- **Budget Alert** is create with the name of `Platform Lab mOnthly Cost Budget`;
+- I choose access key for simplicity but the safest is to use SSO
+
 > Before changing infrastructure, I verify the account, region, execution identity, and expected impact.
 
 ## Lab environment (verified 2026-11-14)

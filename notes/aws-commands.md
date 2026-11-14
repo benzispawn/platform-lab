@@ -119,6 +119,16 @@ aws s3 presign s3://<bucket>/hello.txt --expires-in 300 --profile <p>
 > An access point is **not** needed for privacy. Access points are a separate
 > feature for managing access at scale.
 
+## S3 - Save credentials to console variables
+
+```bash
+eval "$(aws sts assume-role \
+  --role-arn arn:aws:iam::771983217432:role/platform-lab-s3-reader \
+  --role-session-name lab-test --profile platform-lab-deployer \
+  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text \
+  | awk '{print "export AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')"
+```
+
 ---
 
 ## IAM — Permissions needed for these commands

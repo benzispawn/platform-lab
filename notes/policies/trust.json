@@ -1,0 +1,13 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AssumeRolePlatformLab",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::771983217432:user/platform-lab-deployer"
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}
