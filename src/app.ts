@@ -1,6 +1,6 @@
 import express, {type Express, type Request, type Response} from 'express';
 import * as dotenv from 'dotenv';
-import { testReadyNess } from './helpers/testReadyness.helper.ts';
+import { testReadiNess } from './helpers/testReadiness.helper.ts';
 
 const app: Express = express();
 dotenv.config();
@@ -11,7 +11,7 @@ app.get('/health/live', (req: Request, res: Response) => {
 });
 
 app.get('/health/ready', (req: Request, res: Response) => {
-    if (testReadyNess()) {
+    if (!testReadiNess()) {
         return res.status(503).send('Service Unavailable');
     }
     res.json({ health: true, ready: true });
