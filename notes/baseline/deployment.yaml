@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-lab
+spec:
+  selector:
+    matchLabels:
+      app: platform-lab
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: platform-lab
+    spec:
+      containers:
+        - name: platform-lab
+          image: platform-lab:1.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3001s
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 120m
+              memory: 128Mi

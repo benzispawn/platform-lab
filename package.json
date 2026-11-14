@@ -4,9 +4,9 @@
   "description": "",
   "main": "src/app.ts",
   "scripts": {
-    "start": "node src/app.ts",
+    "start": "node src/server.ts",
     "build": "",
-    "test": "curl localhost:8082/health/live"
+    "test": "node --test 'test/**/*.test.ts'"
   },
   "keywords": [],
   "author": "",
