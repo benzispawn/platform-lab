@@ -17,3 +17,8 @@ output "caller_arn" {
   description = "ARN of the current user"
   value       = data.aws_caller_identity.current.arn
 }
+
+output "vpc_id" {
+  description = "The vpc_id output"
+  value       = aws_vpc.platform_lab_vpc.id
+}

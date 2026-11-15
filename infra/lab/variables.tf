@@ -27,3 +27,9 @@ variable "aws_profile" {
   description = "The environment aws profile name"
   default     = null
 }
+
+variable "vpc_cidr" {
+  type        = string
+  description = "The CIDR that we will use"
+  default     = "10.0.0.0/20"
+}
