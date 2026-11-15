@@ -46,6 +46,7 @@
 - **Decision:** maintain bucket and file object and ECR. VPC was delete with all the subnets, IGW, etc
 - For this moment we are using `platform-lab-deployer` but in near future for deployment in Github Actions we'll use Github OIDC
 - I'm not going to use `map_public_ip_on_launch`because of the cost
+- We'll keep **10.0.0.0/20** because we don't to much IPs for this lab
 
 ## Budgets are not a spending cap
 
