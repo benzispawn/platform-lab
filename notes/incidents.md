@@ -197,3 +197,38 @@ A permissions boundary grants nothing; it is a ceiling (`identity policies ∩ b
 a created role from reaching IAM, but if the creator can also write the role's trust policy and
 assume it, the creator gets **everything up to the ceiling**. The simplest safe fix is to not let
 the deployer create roles at all.
+
+## Incident #3 (drift) — 2026-11-15: Terraform state pointed at deleted resources
+
+| | |
+| --- | --- |
+| **Stack** | `infra/lab` (local state: `infra/lab/terraform.tfstate`) |
+| **Resources** | The lab network in `network.tf` (VPC, subnets and related resources) |
+| **Cause** | Managed resources deleted by hand in the AWS Console, **twice** |
+
+- **Impact:** `terraform plan` wanted to recreate 12 resources, and the state listed IDs
+  that no longer existed in AWS. State and reality no longer matched.
+
+- **Evidence:** the provider returned `InvalidVpcID.NotFound` for the VPC ID stored in state.
+  The resource was gone, but Terraform still tracked it.
+
+- **Root cause:** I deleted Terraform-managed resources in the Console, twice. Terraform
+  does not see Console changes; it only finds out on the next refresh, so the state kept
+  the old IDs.
+
+- **Fix:**
+  1. `terraform apply -refresh-only`: reconcile the state with what actually exists, so the
+     deleted resources are removed from state. It changes no infrastructure.
+  2. `terraform plan` then `terraform apply`: re-create the resources from code.
+
+- **Verification:** `terraform plan` right after the apply shows `No changes`.
+
+- **Prevention:**
+  - Change managed resources **only through code**. If something must be removed, remove
+    it from the `.tf` files (or `terraform destroy -target=...`), not in the Console.
+  - In a team: restrict Console write access for Terraform-managed resources, and run a
+    scheduled `terraform plan -detailed-exitcode` to detect drift (exit code `2` = drift).
+
+- **Lesson:** Terraform state is a record, not a live view. Any change made outside
+  Terraform turns into drift, and `-refresh-only` is the safe way to see and accept it
+  before applying code again.
