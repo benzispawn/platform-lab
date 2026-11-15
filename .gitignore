@@ -1,2 +1,8 @@
 node_modules
 .env
+**/.terraform
+**/*.tfstate.lock.info
+**/*.tfplan
+**/*.tfstate
+**/plan-debug.log
+**/terraform.tfstate.backup

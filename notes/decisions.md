@@ -42,6 +42,10 @@
 - **Decision:** add a `DenyInsecureTransport` bucket policy (not required by the plan).
 - **Why:** an explicit Deny beats any Allow, so no identity can access the bucket over plain HTTP.
 
+## D4: Stablishing Terraform
+- **Decision:** maintain bucket and file object and ECR. VPC was delete with all the subnets, IGW, etc
+- For this moment we are using `platform-lab-deployer` but in near future for deployment in Github Actions we'll use Github OIDC
+
 ## Budgets are not a spending cap
 
 A budget alert only **notifies** (email when the threshold is reached). It does not stop
