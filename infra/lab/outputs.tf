@@ -26,15 +26,15 @@ output "vpc_id" {
 output "public_subnet_ids" {
   description = "A list of public subnet ids"
   value = [
-    aws_subnet.platform_lab_vpc_public_1,
-    aws_subnet.platform_lab_vpc_public_2
+    aws_subnet.platform_lab_vpc_public_1.id,
+    aws_subnet.platform_lab_vpc_public_2.id
   ]
 }
 
 output "private_subnet_ids" {
   description = "A list of private subnet ids"
   value = [
-    aws_subnet.platform_lab_vpc_private_1,
-    aws_subnet.platform_lab_vpc_private_2
+    aws_subnet.platform_lab_vpc_private_1.id,
+    aws_subnet.platform_lab_vpc_private_2.id
   ]
 }
