@@ -232,3 +232,130 @@ the deployer create roles at all.
 - **Lesson:** Terraform state is a record, not a live view. Any change made outside
   Terraform turns into drift, and `-refresh-only` is the safe way to see and accept it
   before applying code again.
+
+## Incident #4 (stale lock) — 2026-11-16: State lock not released after a backend permission error
+
+| | |
+| --- | --- |
+| **Stack** | `infra/lab` (S3 backend: `platform-lab-tfstate-771983217432-sa-east-1-an`, key `lab/terraform.tfstate`) |
+| **Locking** | S3 native lockfile (`use_lockfile = true`), lock object `lab/terraform.tfstate.tflock` |
+| **Identity** | `platform-lab-deployer` (backend `profile`) |
+| **Cause** | Deployer missing an S3 permission on the state bucket, created in `infra/bootstrap` |
+
+- **Impact:** every `plan` / `apply` on `infra/lab` failed with `Error acquiring the state lock`.
+  The stack was blocked until the lock was removed by hand. No infrastructure was changed.
+
+- **Evidence:**
+  - The run that set up the new backend failed with an `AccessDenied` from S3, and Terraform
+    then printed `Error releasing the state lock`.
+  - The next run failed with `Error acquiring the state lock` and showed lock info with
+    **my own** `Who` (user@host), the `Operation` I had just run, and a `Created` time matching
+    that failed run.
+  - No other Terraform process was running: no second terminal, no CI pipeline yet (GitHub
+    Actions is planned, see D4).
+
+- **Root cause:**
+  - With `use_lockfile = true`, Terraform takes the lock by **writing** a `.tflock` object next
+    to the state (`s3:PutObject`) and releases it by **deleting** it (`s3:DeleteObject`).
+  - The deployer was allowed to create the lock object but not to delete it, so the lock was
+    taken, the run failed, and the release also failed. The `.tflock` object stayed in the
+    bucket with nothing to remove it. (If `PutObject` had been missing instead, the lock would
+    never have been created and nothing would have stayed locked.)
+  - The bootstrap created the bucket, but the deployer's S3 permissions were not reviewed
+    against what the backend needs.
+
+- **Fix:**
+  1. Give the deployer the permissions the S3 backend needs, scoped to this bucket and key:
+
+     ```json
+     {
+       "Version": "2012-10-17",
+       "Statement": [
+         {
+           "Sid": "TfStateList",
+           "Effect": "Allow",
+           "Action": "s3:ListBucket",
+           "Resource": "arn:aws:s3:::platform-lab-tfstate-771983217432-sa-east-1-an",
+           "Condition": { "StringLike": { "s3:prefix": "lab/*" } }
+         },
+         {
+           "Sid": "TfStateReadWrite",
+           "Effect": "Allow",
+           "Action": ["s3:GetObject", "s3:PutObject"],
+           "Resource": "arn:aws:s3:::platform-lab-tfstate-771983217432-sa-east-1-an/lab/terraform.tfstate"
+         },
+         {
+           "Sid": "TfStateLockfile",
+           "Effect": "Allow",
+           "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+           "Resource": "arn:aws:s3:::platform-lab-tfstate-771983217432-sa-east-1-an/lab/terraform.tfstate.tflock"
+         }
+       ]
+     }
+     ```
+
+     `DeleteObject` is only needed on the **lock** object, not on the state itself. The bucket
+     is versioned, so state history is kept anyway.
+
+     The permission had to be fixed **first**: `force-unlock` releases the lock the same way
+     (by deleting `.tflock`), so without `DeleteObject` it fails with the same `AccessDenied`.
+
+  2. Confirm the lock is mine and no run is active (see the checklist below), then remove it
+     with the lock ID from the error message:
+
+     ```bash
+     cd infra/lab
+     terraform force-unlock <LOCK_ID>
+     ```
+
+- **Verification:**
+
+  ```bash
+  terraform plan          # runs without a lock error
+  aws s3 ls s3://platform-lab-tfstate-771983217432-sa-east-1-an/lab/ \
+    --profile platform-lab-deployer   # only terraform.tfstate, no .tflock left after the run
+  ```
+
+### When `force-unlock` is safe vs dangerous
+
+`force-unlock` does **not** stop anything. It only deletes the lock record. If a Terraform
+process is still running, it keeps running and can now write the state at the same time as
+someone else.
+
+**Safe** (all must be true):
+
+- The lock info `Who` is **me** on **this machine**, and `Operation` / `Created` match a run
+  that I know failed or was killed.
+- That process has really exited: the terminal returned, `ps aux | grep terraform` shows nothing.
+- Nothing else can run on this state: no other terminal, teammate, or CI job.
+- The cause of the stuck lock is fixed first (here: the missing `DeleteObject`), or the next
+  run will leave a new stale lock.
+
+**Dangerous** (do not unlock):
+
+- The lock belongs to **another** person, machine, or CI job. Ask them or check the pipeline
+  first. "It has been locked a long time" is not proof it is dead: a big `apply` (EKS, RDS)
+  can take 20+ minutes.
+- Unlocking just to get past `Error acquiring the state lock` without reading the lock info.
+- A lock ID that does not match the error message.
+- The original run died **in the middle of an apply**. Unlocking is still the way forward, but
+  the state may be out of date: run `terraform plan` (or `apply -refresh-only`) and review it
+  before applying anything.
+
+If two runs write the state at the same time, the last write wins. Resources created by the
+other run can drop out of state and become orphaned, which is the same kind of problem as
+Incident #3, but harder to see.
+
+- **Prevention:**
+  - Treat backend permissions as part of the bootstrap: when the state bucket is created, the
+    policy for the identity that uses it (deployer now, GitHub OIDC role later) must include
+    `ListBucket`, `GetObject` / `PutObject` on the state key, and `DeleteObject` on the `.tflock`.
+  - Test a new backend with a harmless command first (`terraform init` then `terraform plan`).
+    A permission gap shows up there, before an `apply` holds the lock.
+  - Prefer fixing permissions over `-lock=false`. Running without a lock hides this kind of
+    problem and removes the protection the lock gives.
+  - In CI: one concurrency group per state, so two jobs never run on the same stack together.
+
+- **Lesson:** a lock that cannot be released is almost always a **permissions** problem on the
+  lock object, not a Terraform bug. Read the lock info, prove nothing is running, fix the
+  cause, and only then `force-unlock`.

@@ -3,6 +3,5 @@ node_modules
 **/.terraform
 **/*.tfstate.lock.info
 **/*.tfplan
-**/*.tfstate
 **/plan-debug.log
 **/terraform.tfstate.backup
