@@ -359,3 +359,100 @@ Incident #3, but harder to see.
 - **Lesson:** a lock that cannot be released is almost always a **permissions** problem on the
   lock object, not a Terraform bug. Read the lock info, prove nothing is running, fix the
   cause, and only then `force-unlock`.
+
+## Incident #5 (rollout) — 2026-11-16: `dev` ran 1.0.0, `/version` said 1.3.1, and the new rollout stalled
+
+| | |
+| --- | --- |
+| **Cluster** | kind `platform-lab`, namespace `dev` |
+| **Workload** | Deployment `platform-lab` (2 replicas, RollingUpdate, `maxSurge` / `maxUnavailable` 25%) |
+| **Config** | ConfigMap `platform-lab-config` (`k8s/dev/configmap.yaml`) |
+| **Cause** | Stale image tag in `k8s/deployment.yaml`, version taken from config instead of the build, and `SIMULATE_READINESS: "0"` on the new rollout |
+
+- **Impact:**
+  - `dev` served **1.0.0 code** while the config and `/version` said it was **1.3.1**. Any
+    check based on `/version` would have passed for the wrong build.
+  - The rollout to the real 1.3.1 image stalled at `1 out of 2 new replicas`. There was **no
+    outage**: the two old pods stayed ready and kept serving.
+
+- **Evidence:**
+  - `kubectl get rs -n dev` (image, desired, ready, revision):
+
+    ```text
+    platform-lab-555c47d8b8   platform-lab:1.0.0   2   2   rev 3   <- serving
+    platform-lab-6f84ff588b   platform-lab:1.3.1   1   0   rev 6   <- new, never ready
+    ```
+
+  - `kubectl rollout history -n dev deploy/platform-lab --revision=3` → `Image: platform-lab:1.0.0`.
+    The committed `k8s/deployment.yaml` (`c678e81`) still had `image: platform-lab:1.0.0`, while
+    the ConfigMap had already been changed to `VERSION: "1.3.1"`.
+  - A **1.0.0** pod answered `/version` with `{"version":"1.3.1"}`. `src/app.ts` reads
+    `process.env.VERSION`, and that env var comes from the ConfigMap, so it reports the config,
+    not the code. `package.json` still says `1.0.0`, and the Dockerfile sets no version.
+  - New pod events: `Readiness probe failed: HTTP probe failed with statuscode: 503` (x25).
+    `/health/ready` returns 503 when `SIMULATE_READINESS` is `"0"`.
+  - An old 1.0.0 pod has `SIMULATE_READINESS=0` in its env but still returns `200` on
+    `/health/ready`. That image predates the readiness switch, so it ignores the flag.
+  - `kubectl rollout status` timed out. Deployment conditions: `Available=True`
+    (`MinimumReplicasAvailable`), `Progressing=True` (`ReplicaSetUpdated`).
+
+- **Hypothesis:** three separate faults that hid each other.
+  1. **Stale tag.** The image tag in the manifest was not bumped with the release, so
+     `kubectl apply` kept deploying 1.0.0. With `IfNotPresent` and a fixed tag, Kubernetes
+     does exactly what the manifest says. Nothing pulled a newer image.
+  2. **`/version` was not true.** The version came from deploy-time config, not from the
+     artifact. Any image paired with that ConfigMap would report `1.3.1`.
+  3. **The readiness gate did its job.** The new 1.3.1 pods were not ready (503), so they
+     received no Service traffic. With 2 replicas, `maxUnavailable: 25%` rounds **down** to 0
+     and `maxSurge: 25%` rounds **up** to 1. The Deployment may add one extra pod but may not
+     remove a ready one until a new pod is ready. So the old pods stayed, and the rollout waited.
+
+- **Smallest fix:**
+  1. Set `image: platform-lab:1.3.1` in `k8s/deployment.yaml` (done in the working tree).
+  2. Set `SIMULATE_READINESS: "1"` in the cluster and in `k8s/dev/configmap.yaml` (they
+     must match), then restart, because pods read env values only when they start:
+
+     ```bash
+     kubectl apply -f k8s/dev/configmap.yaml
+     kubectl rollout restart -n dev deploy/platform-lab
+     ```
+
+     Or, to just back out the bad rollout: `kubectl rollout undo -n dev deploy/platform-lab`.
+  3. Make `/version` come from the build, not the ConfigMap: pass it at build time
+     (`ARG VERSION` → `ENV VERSION=$VERSION` in the Dockerfile,
+     `docker build --build-arg VERSION=1.3.1 -t platform-lab:1.3.1 .`), and remove `VERSION`
+     from the ConfigMaps so config cannot override it.
+
+- **Verification:**
+
+  ```bash
+  kubectl rollout status -n dev deploy/platform-lab              # successfully rolled out
+  kubectl get pods -n dev -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready
+                                                                  # every pod 1.3.1, ready=true
+  kubectl get rs -n dev                                           # old ReplicaSets at 0
+  kubectl exec -n dev deploy/platform-lab -- \
+    node -e "fetch('http://localhost:3001/version').then(r=>r.text()).then(console.log)"
+                                                                  # matches the image tag
+  ```
+
+  The check that matters: the **image tag on the pod** and **`/version`** agree, and `/version`
+  still tells the truth when the ConfigMap is changed.
+
+- **Prevention:**
+  - Never trust `/version` alone. Check what is actually running:
+    `kubectl get pods -o jsonpath='{..image}'` (and the image digest in `status.containerStatuses`).
+  - Report the version from the artifact: build arg, `package.json`, or the Git SHA. In CI, tag
+    images with the commit SHA and set the manifest tag from the pipeline, so the tag cannot be
+    forgotten.
+  - Keep the readiness probe on every Deployment, and set `maxUnavailable: 0` explicitly so
+    a bad release can never take away serving pods.
+  - Wait on `kubectl rollout status --timeout=...` after every apply, and treat a timeout as a
+    failed deploy (`rollout undo`). Lower `progressDeadlineSeconds` (now 600) so a stuck
+    rollout is reported as `ProgressDeadlineExceeded` sooner.
+  - Change config **in the file, then apply**. Do not `kubectl edit` live, or the cluster and
+    the repo drift apart.
+
+- **Lesson:** a successful `kubectl apply` only means the desired state was accepted. It does not
+  mean the right code is running. Check the image the pod actually runs, make the app report a
+  version that comes from the build, and rely on readiness plus a rolling update to keep a bad
+  release from replacing good pods.
