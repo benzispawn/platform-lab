@@ -14,6 +14,5 @@ terraform {
     region       = "sa-east-1"
     encrypt      = true
     use_lockfile = true
-    profile      = "platform-lab-deployer"
   }
 }
