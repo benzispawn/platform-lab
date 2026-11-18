@@ -1,0 +1,21 @@
+name: Platform Lab - CI
+
+on:
+    pull_request:
+        branches: [main]
+
+jobs:
+    build:
+        runs-on: ubuntu-slim
+        steps:
+            - uses: actions/checkout@v6
+            - name: Use Node.js
+              uses: actions/setup-node@v7
+              with:
+                  node-version: "24.14.1"
+            - name: Install dependencies
+              run: npm ci
+            - name: Testing project
+              run: npm test
+            - name: Building the Docker image
+              run: docker build -t platform-lab:${var.VERSION}

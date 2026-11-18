@@ -5,7 +5,8 @@
       "k8s/**/*.yml",
       "notes/**/*.yaml",
       "notes/**/*.yml"
-    ]
+    ],
+    "https://json.schemastore.org/github-workflow.json": ".github/workflows/*.{yml,yaml}"
   },
   "yaml.completion": true,
   "yaml.validate": true,
