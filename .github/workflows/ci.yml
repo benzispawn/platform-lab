@@ -17,5 +17,18 @@ jobs:
               run: npm ci
             - name: Testing project
               run: npm test
-            - name: Building the Docker image
-              run: docker build -t platform-lab:${var.VERSION}
+            - id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: platform-Lab
+                  tag: |
+                      type=sha
+                      type=semver,pattern={{version}}
+                      type=semver,pattern={{major}}.{{minor}}
+            - uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  push: false
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  build-args: VERSION=${{ steps.meta.outputs.version }}
