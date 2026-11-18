@@ -6,7 +6,7 @@ on:
 
 jobs:
     build:
-        runs-on: ubuntu-slim
+        runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v6
             - name: Use Node.js
@@ -20,8 +20,8 @@ jobs:
             - id: meta
               uses: docker/metadata-action@v5
               with:
-                  images: platform-Lab
-                  tag: |
+                  images: platform-lab
+                  tags: |
                       type=sha
                       type=semver,pattern={{version}}
                       type=semver,pattern={{major}}.{{minor}}
