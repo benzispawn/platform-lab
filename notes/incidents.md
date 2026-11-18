@@ -456,3 +456,178 @@ Incident #3, but harder to see.
   mean the right code is running. Check the image the pod actually runs, make the app report a
   version that comes from the build, and rely on readiness plus a rolling update to keep a bad
   release from replacing good pods.
+
+## Incident #6 (selector) — 2026-11-17: Deployment available, but Service requests failed
+
+| | |
+| --- | --- |
+| **Cluster** | kind `platform-lab`, namespace `drill` |
+| **Workload** | Deployment `platform-lab` (2/2 available, image `platform-lab:1.3.2`) |
+| **Service** | `platform-lab` (ClusterIP, `80` → `targetPort: 3001`) |
+| **Cause** | Service selector `tier: web` did not match the pod label `tier: api` |
+
+- **Impact:** every request to `http://platform-lab` from inside the namespace failed, even
+  though the Deployment reported `2/2` ready. Clients could not reach the app at all.
+  (Planned drill: "Deployment is available but Service requests fail".)
+
+- **Evidence:**
+  - Test client, run inside the namespace so it uses the Service DNS name:
+
+    ```bash
+    kubectl run client -n drill --rm -i --restart=Never --image=platform-lab:1.3.2 \
+      --image-pull-policy=IfNotPresent --command -- \
+      node -e "fetch('http://platform-lab/health/ready').then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.code))"
+    ```
+
+    It printed an error code (`ECONNREFUSED`), not an HTTP status. DNS resolved (the error was not
+    `ENOTFOUND`), so the Service existed but had nowhere to send traffic.
+  - `kubectl get deploy -n drill`: `2/2` available, and the pods were `1/1 Running`, so the app
+    and its readiness probe were fine.
+  - The Service's selector did not match the pod labels:
+
+    ```text
+    kubectl get svc -n drill platform-lab -o wide   # SELECTOR app=platform-lab,tier=web
+    kubectl get pods -n drill --show-labels         # app=platform-lab,...,tier=api
+    ```
+
+  - `kubectl get endpointslices -n drill` showed **no endpoints** for the Service.
+
+- **Hypothesis:** a Service sends traffic only to **ready pods whose labels match every key in its
+  selector**. `tier: web` matched no pod, so the EndpointSlice stayed empty. With no endpoints,
+  kube-proxy rejects connections to the ClusterIP, which gives `ECONNREFUSED`. The Deployment does
+  not depend on the Service at all, so it showed healthy the whole time.
+
+  Ruled out: the app (pods ready, readiness probe passing), DNS (no `ENOTFOUND`), and the ports
+  (`targetPort: 3001` matches `containerPort: 3001`).
+
+- **Smallest fix:** change only the Service selector to the label the pods actually have.
+  Do not relabel the pods: changing the Deployment's pod template would roll the pods for no reason.
+
+  ```bash
+  kubectl patch svc platform-lab -n drill \
+    -p '{"spec":{"selector":{"app":"platform-lab","tier":"api"}}}'
+  ```
+
+  Applied with `kubectl patch` (managedFields: `kubectl-patch`, 2026-11-18T00:47Z UTC).
+
+- **Verification:**
+
+  ```bash
+  kubectl get endpointslices -n drill                # 10.244.0.11,10.244.0.12 on port 3001
+  kubectl run client -n drill ... (same command as above)   # 200
+  ```
+
+  The `200` from a pod inside the cluster proves the full path: DNS → ClusterIP → endpoint → pod.
+
+- **Follow-up:** the patch fixed only the live object. The Service's
+  `last-applied-configuration` still says `tier: web`, so the next `kubectl apply` of the
+  original manifest would break the Service again. Fix the selector in the manifest and apply it.
+
+- **Prevention:**
+  - After every Service change, check that it has endpoints: `kubectl get endpointslices -n <ns>`.
+    An empty endpoint list is the first thing to look for when the Deployment looks healthy.
+  - Keep the Service selector and the pod template labels in the same file, or use a shared label
+    set (Kustomize `labels`, Helm helpers), so they cannot drift apart.
+  - Change the manifest and apply it, and use `patch` / `edit` only in an emergency, followed by
+    the same change in Git.
+  - Add a smoke test after deploy that calls the Service by name from inside the cluster, not just
+    `rollout status`. A rollout can succeed while the Service is broken.
+
+- **Lesson:** "Deployment available" and "Service reachable" are separate checks. A Service is
+  a label query. If the query matches nothing, it has no endpoints, and every request fails while
+  every pod looks healthy. Check in order: endpoints → selector vs labels → `targetPort` vs `containerPort`.
+
+## Incident #7 (image) — 2026-11-17: Release 1.4.0 stuck in `ImagePullBackOff`
+
+| | |
+| --- | --- |
+| **Cluster** | kind `platform-lab` (single node `platform-lab-control-plane`), namespace `drill` |
+| **Workload** | Deployment `platform-lab`, revision 2 (`CHANGE-CAUSE: release 1.4.0`) |
+| **Image** | `platform-lab:1.4.0`, `imagePullPolicy: IfNotPresent` |
+| **Cause** | The image tag was never built or loaded into the kind node, so the kubelet tried Docker Hub |
+
+- **Impact:** release 1.4.0 never started. Its pod stayed in `ImagePullBackOff` for ~38 minutes.
+  **No outage:** the rolling update kept the two 1.3.2 pods running and ready, and the Service
+  kept sending traffic to them.
+
+- **Evidence:**
+  - `kubectl describe pod -n drill platform-lab-9987d88d5-28984`:
+
+    ```text
+    Pulling    35m (x5 over 38m)     Pulling image "platform-lab:1.4.0"
+    Failed     35m (x5 over 38m)     Failed to pull image "platform-lab:1.4.0": ... failed to resolve reference
+               "docker.io/library/platform-lab:1.4.0": pull access denied, repository does not exist
+               or may require authorization: server message: insufficient_scope: authorization failed
+    Failed     35m (x5 over 38m)     Error: ErrImagePull
+    BackOff    3m53s (x152 over 38m) Back-off pulling image "platform-lab:1.4.0"
+    Failed     3m53s (x152 over 38m) Error: ImagePullBackOff
+    ```
+
+  - `Scheduled` succeeded, so this was not a scheduling or resource problem. It failed at the
+    **pull** step, before any container existed, so there were no app logs to read.
+  - The image was not on the node: `docker exec platform-lab-control-plane crictl images | grep platform-lab`
+    listed `1.0.0`, `1.3.1`, `1.3.2`, `dev`, `latest`, but no `1.4.0`. It was not in local Docker
+    either (`docker images platform-lab`).
+  - The Service still answered. The client from Incident #6 printed `200`:
+
+    ```bash
+    kubectl run client -n drill --rm -i --restart=Never --image=platform-lab:1.3.2 \
+      --image-pull-policy=IfNotPresent --command -- \
+      node -e "fetch('http://platform-lab/health/ready').then(r=>console.log(r.status)).catch(e=>console.log(e.cause?.code))"
+    ```
+
+- **Hypothesis:** the tag `1.4.0` was never built or loaded into kind.
+  - kind nodes do not share the host's Docker images. An image must be copied in with
+    `kind load docker-image`.
+  - With `IfNotPresent` and the image missing on the node, the kubelet tries to pull. A short name
+    like `platform-lab:1.4.0` expands to `docker.io/library/platform-lab:1.4.0`, which does not exist.
+  - Docker Hub replies to a missing repository with `pull access denied ... insufficient_scope`.
+    That message looks like a credentials problem, but here it means **"not found"**. There is no
+    registry and no pull secret involved.
+  - Why traffic was safe: the new pod never became ready, and with 2 replicas `maxUnavailable: 25%`
+    rounds down to 0. So no old pod was removed (the same mechanism as Incident #5).
+
+- **Smallest fix:** roll back to the last good revision. Do not edit the manifest under pressure:
+
+  ```bash
+  kubectl rollout undo -n drill deploy/platform-lab
+  ```
+
+  Revision 1 (`platform-lab:1.3.2`) came back as **revision 3** (2026-11-18T01:31Z UTC), and the
+  1.4.0 ReplicaSet `platform-lab-9987d88d5` was scaled to 0.
+
+  To actually ship 1.4.0 later: build it, load it into kind, then roll forward:
+
+  ```bash
+  docker build --build-arg VERSION=1.4.0 -t platform-lab:1.4.0 .
+  kind load docker-image platform-lab:1.4.0 --name platform-lab
+  kubectl set image -n drill deploy/platform-lab platform-lab=platform-lab:1.4.0
+  kubectl annotate -n drill deploy/platform-lab kubernetes.io/change-cause="release 1.4.0" --overwrite
+  kubectl rollout status -n drill deploy/platform-lab --timeout=120s
+  ```
+
+- **Verification:**
+
+  ```bash
+  kubectl rollout status -n drill deploy/platform-lab   # successfully rolled out
+  kubectl rollout history -n drill deploy/platform-lab  # 2: release 1.4.0 / 3: <none> (the undo)
+  kubectl get rs -n drill -o wide                       # 7b9c6b7f7b (1.3.2) 2/2, 9987d88d5 (1.4.0) 0
+  kubectl get endpointslices -n drill                   # 10.244.0.11,10.244.0.12
+  kubectl run client -n drill ... (same command as above)   # 200
+  ```
+
+- **Prevention:**
+  - Make "the image exists where the cluster pulls from" part of the release: `build → load (kind) /
+    push (ECR) → set image`, in that order, in one script or pipeline job.
+  - Check before rolling out: `docker exec platform-lab-control-plane crictl images` for kind, or
+    `aws ecr describe-images --image-ids imageTag=<tag>` for ECR.
+  - Use fully qualified image names (`<account>.dkr.ecr.<region>.amazonaws.com/platform-lab:<tag>`)
+    so a missing image never falls back to Docker Hub with a confusing error.
+  - Always wait on `kubectl rollout status --timeout=...` and undo on timeout. Keep
+    `progressDeadlineSeconds` low enough that a stuck release becomes `ProgressDeadlineExceeded` quickly.
+  - Record `change-cause` on every release so `rollout history` shows which revision to return to.
+
+- **Lesson:** `ImagePullBackOff` happens before the container exists, so look at `describe`
+  events, not logs. On kind, "pull access denied / repository does not exist" for a local image
+  almost always means "not loaded into the node". The rolling update plus readiness kept the old
+  version serving, and `rollout undo` was the fastest safe recovery.
