@@ -10,6 +10,7 @@ jobs:
         permissions:
             id-token: write
             contents: read
+        environment: deploy
         steps:
             - uses: actions/checkout@v6
             - name: Use Node.js
