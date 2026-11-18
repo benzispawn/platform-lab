@@ -7,6 +7,9 @@ on:
 jobs:
     build:
         runs-on: ubuntu-latest
+        permissions:
+            id-token: write
+            contents: read
         steps:
             - uses: actions/checkout@v6
             - name: Use Node.js
@@ -17,6 +20,12 @@ jobs:
               run: npm ci
             - name: Testing project
               run: npm test
+            - uses: aws-actions/configure-aws-credentials@v5
+              with:
+                  role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+                  aws-region: sa-east-1
+            - id: ecr
+              uses: aws-actions/amazon-ecr-login@v2
             - id: meta
               uses: docker/metadata-action@v5
               with:
