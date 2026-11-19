@@ -52,3 +52,15 @@
 
 A budget alert only **notifies** (email when the threshold is reached). It does not stop
 resources or block spending. Cleanup and tags are what actually control cost.
+
+## D7: Terraform apply
+
+- **Separate workflow** `terraform-apply.yml`, triggered by `workflow_dispatch` or `push` to main.
+- **Environment `infra`** with a required reviewer. The OIDC sub becomes
+  `repo:benzispawn/platform-lab:environment:infra`, and only a separate apply role trusts it.
+  The plan role cannot apply.
+- **concurrency:** `group: tfstate-lab`, `cancel-in-progress: false`. A cancelled apply can
+  leave a held lock or partially applied infra.
+- **Flow:** checkout the triggering SHA → plan -out=tfplan (with lock) → reviewer approves
+  → apply that tfplan in the same run. Never a plan file from another run or commit.
+- **Why not reuse an old plan:** <your answer>

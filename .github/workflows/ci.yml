@@ -52,3 +52,42 @@ jobs:
             - run: terraform fmt -check -recursive
             - run: terraform init -backend=false
             - run: terraform validate
+    terraform-plan:
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            id-token: write
+            contents: read
+        concurrency:
+            group: tfstate-lab
+            cancel-in-progress: false
+        defaults:
+            run:
+                working-directory: infra/lab
+        steps:
+            - uses: actions/checkout@v6
+            - uses: hashicorp/setup-terraform@v3
+              with:
+                  terraform_wrapper: false
+            - uses: aws-actions/configure-aws-credentials@v5
+              with:
+                  role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+                  aws-region: sa-east-1
+            - run: terraform init -input=false
+            - id: plan
+              run: |
+                  set +e
+                  terraform plan -input=false -lock=false -no-color -detailed-exitcode -out=tfplan
+                  code=$?
+                  echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+                  [ $code -eq 1 ] && exit 1 || exit 0
+            - name: Plan summary
+              run: |
+                  {
+                    echo "## Terraform plan: infra/lab"
+                    echo "Exit code: ${{ steps.plan.outputs.exitcode }} (0 = no changes, 2 = changes)"
+                    echo '```'
+                    terraform show -no-color tfplan
+                    echo '```'
+                  } >> "$GITHUB_STEP_SUMMARY"
