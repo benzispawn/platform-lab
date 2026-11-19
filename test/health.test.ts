@@ -36,7 +36,7 @@ describe('health check', () => {
     });
 
     it('should result 503 when SIMULATE_READINESS equal 1', async () => {
-        process.env.SIMULATE_READINESS = '0';
+        process.env.SIMULATE_READINESS = '1';
         const result = await fetch(`${baseUrl}/health/ready`);
 
         assert.equal(result.status, 503);

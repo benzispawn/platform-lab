@@ -3,17 +3,10 @@ name: Platform Lab - CI
 on:
     pull_request:
         branches: [main]
-    push:
-        branches: [main]
-        tags: ["v*.*.*"]
 
 jobs:
     build:
         runs-on: ubuntu-latest
-        permissions:
-            id-token: write
-            contents: read
-        environment: deploy
         steps:
             - uses: actions/checkout@v6
             - name: Use Node.js
