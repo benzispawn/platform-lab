@@ -72,7 +72,7 @@ jobs:
                   terraform_wrapper: false
             - uses: aws-actions/configure-aws-credentials@v5
               with:
-                  role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+                  role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
                   aws-region: sa-east-1
             - run: terraform init -input=false
             - id: plan
