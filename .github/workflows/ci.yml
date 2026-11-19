@@ -24,12 +24,6 @@ jobs:
               run: npm ci
             - name: Testing project
               run: npm test
-            - uses: aws-actions/configure-aws-credentials@v5
-              with:
-                  role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-                  aws-region: sa-east-1
-            - id: ecr
-              uses: aws-actions/amazon-ecr-login@v2
             - id: meta
               uses: docker/metadata-action@v5
               with:
