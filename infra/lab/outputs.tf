@@ -18,23 +18,23 @@ output "caller_arn" {
   value       = data.aws_caller_identity.current.arn
 }
 
-output "vpc_id" {
-  description = "The vpc_id output"
-  value       = aws_vpc.platform_lab_vpc.id
-}
+# output "vpc_id" {
+#   description = "The vpc_id output"
+#   value       = aws_vpc.platform_lab_vpc.id
+# }
 
-output "public_subnet_ids" {
-  description = "A list of public subnet ids"
-  value = [
-    aws_subnet.platform_lab_vpc_public_1.id,
-    aws_subnet.platform_lab_vpc_public_2.id
-  ]
-}
+# output "public_subnet_ids" {
+#   description = "A list of public subnet ids"
+#   value = [
+#     aws_subnet.platform_lab_vpc_public_1.id,
+#     aws_subnet.platform_lab_vpc_public_2.id
+#   ]
+# }
 
-output "private_subnet_ids" {
-  description = "A list of private subnet ids"
-  value = [
-    aws_subnet.platform_lab_vpc_private_1.id,
-    aws_subnet.platform_lab_vpc_private_2.id
-  ]
-}
+# output "private_subnet_ids" {
+#   description = "A list of private subnet ids"
+#   value = [
+#     aws_subnet.platform_lab_vpc_private_1.id,
+#     aws_subnet.platform_lab_vpc_private_2.id
+#   ]
+# }
