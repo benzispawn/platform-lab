@@ -4,9 +4,14 @@ on:
     pull_request:
         branches: [main]
 
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
 jobs:
     build:
         runs-on: ubuntu-latest
+        timeout-minutes: 10
         steps:
             - uses: actions/checkout@v6
             - name: Use Node.js
@@ -34,6 +39,7 @@ jobs:
                   build-args: VERSION=${{ steps.meta.outputs.version }}
     terraform:
         runs-on: ubuntu-latest
+        timeout-minutes: 10
         strategy:
             matrix:
                 dir: [infra/lab, infra/bootstrap]
